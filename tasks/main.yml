@@ -1,0 +1,26 @@
+---
+- debug:
+    var: "item"
+  with_items:
+    - "{{ _role_path }}/vars/{{ ansible_distribution | lower }}-{{ ansible_distribution_version | lower }}.yml"
+    - "{{ _role_path }}/vars/{{ ansible_distribution | lower }}.yml"
+    - "{{ _role_path }}/vars/{{ ansible_os_family | lower }}.yml"
+
+- command: "cat {{ item }}"
+  with_items:
+    - "{{ _role_path }}/vars/{{ ansible_distribution | lower }}-{{ ansible_distribution_version | lower }}.yml"
+    - "{{ _role_path }}/vars/{{ ansible_distribution | lower }}.yml"
+    - "{{ _role_path }}/vars/{{ ansible_os_family | lower }}.yml"
+  ignore_errors: true
+
+- name: Gather variables for each operating system
+  include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+        - "{{ _role_path }}/vars/{{ ansible_distribution | lower }}-{{ ansible_distribution_version | lower }}.yml"
+        - "{{ _role_path }}/vars/{{ ansible_distribution | lower }}.yml"
+        - "{{ _role_path }}/vars/{{ ansible_os_family | lower }}.yml"
+
+- include: pre_install.yml
+- include: install.yml
+- include: post_install.yml

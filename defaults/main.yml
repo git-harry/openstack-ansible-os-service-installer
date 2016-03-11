@@ -1,0 +1,29 @@
+---
+_system_group_name: null
+_system_additional_groups: []
+_system_user_name: null
+_system_comment: omit
+_system_shell: omit
+_system_user_home: omit
+_generate_ssh_key: false
+_service_directories: []
+_venv_directories: []
+_venv_enabled: true
+_service_log_directory: null
+_recreate_keys: false
+_developer_constraints: []
+_developer_mode: false
+_pip_install_options: null
+_requires_pip_packages: []
+_venv_download_url: null
+_venv_bin: null
+_pip_packages: []
+_config_template_files: []
+_config_immutable_files: []
+_template_files: []
+_apt_packages: []
+_role_name: null
+_role_path: "../../{{ _role_name }}"
+_requirements_git_repo: null
+_requirements_git_install_branch: null
+_notify_services: []

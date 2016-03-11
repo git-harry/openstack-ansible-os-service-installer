@@ -1,0 +1,161 @@
+---
+# Copyright 2014, Rackspace US, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- include: install_apt.yml
+  when:
+    - ansible_pkg_mgr == 'apt'
+
+- name: Create developer mode constraint file
+  copy:
+    dest: "/opt/developer-pip-constraints.txt"
+    content: |
+      {% for item in _developer_constraints %}
+      {{ item }}
+      {% endfor %}
+  when:
+    - _developer_mode | bool
+
+- name: Clone requirements git repository
+  git:
+    repo: "{{ _requirements_git_repo }}"
+    dest: "/opt/requirements"
+    clone: yes
+    update: yes
+    version: "{{ _requirements_git_install_branch }}"
+  when:
+    - _developer_mode | bool
+
+- name: Add constraints to pip_install_options fact for developer mode
+  set_fact:
+    pip_install_options: "{{ _pip_install_options|default('') }} --constraint /opt/developer-pip-constraints.txt --constraint /opt/requirements/upper-constraints.txt"
+  when:
+    - _developer_mode | bool
+    - "'/opt/developer-pip-constraints.txt' not in _pip_install_options | default('')"
+    - "'/opt/requirements/upper-constraints.txt' not in _pip_install_options | default('')"
+
+- name: Install requires pip packages
+  pip:
+    name: "{{ item }}"
+    state: present
+    extra_args: "{{ _pip_install_options|default('') }}"
+  register: install_packages
+  until: install_packages|success
+  retries: 5
+  delay: 2
+  with_items: _requires_pip_packages
+
+- name: Get local venv checksum
+  stat:
+    path: "/var/cache/{{ _venv_download_url | basename }}"
+    get_md5: False
+  when:
+    - not _developer_mode | bool
+    - _venv_enabled | bool
+  register: local_venv_stat
+
+- name: Get remote venv checksum
+  uri:
+    url: "{{ _venv_download_url | replace('tgz', 'checksum') }}"
+    return_content: True
+  when:
+    - not _developer_mode | bool
+    - _venv_enabled | bool
+  register: remote_venv_checksum
+
+# TODO: When project moves to ansible 2 we can pass this a sha256sum which will:
+#       a) allow us to remove force: yes
+#       b) allow the module to calculate the checksum of dest file which would
+#          result in file being downloaded only if provided and dest sha256sum
+#          checksums differ
+- name: Attempt venv download
+  get_url:
+    url: "{{ _venv_download_url }}"
+    dest: "/var/cache/{{ _venv_download_url | basename }}"
+    force: yes
+  ignore_errors: true
+  register: _get_venv
+  when:
+    - not _developer_mode | bool
+    - _venv_enabled | bool
+    - (local_venv_stat.stat.exists == False or
+        {{ local_venv_stat.stat.checksum is defined and local_venv_stat.stat.checksum != remote_venv_checksum.content | trim }})
+
+- name: Remove existing venv
+  file:
+    path: "{{ _venv_bin | dirname }}"
+    state: absent
+  when:
+    - _venv_enabled | bool
+    - _get_venv | changed
+
+- name: Create venv directory
+  file:
+    path: "{{ _venv_bin | dirname }}"
+    state: directory
+  when:
+    - not _developer_mode | bool
+    - _venv_enabled | bool
+    - _get_venv | changed
+
+- name: Unarchive pre-built venv
+  unarchive:
+    src: "/var/cache/{{ _venv_download_url | basename }}"
+    dest: "{{ _venv_bin | dirname }}"
+    copy: "no"
+  when:
+    - not _developer_mode | bool
+    - _venv_enabled | bool
+    - _get_venv | changed
+  notify: Restart OpenStack service(s)
+
+- name: Update virtualenv path
+  command: >
+    virtualenv-tools --update-path=auto {{ _venv_bin | dirname }}
+  when:
+    - not _developer_mode | bool
+    - _venv_enabled | bool
+    - _get_venv | success
+
+- name: Install pip packages (venv)
+  pip:
+    name: "{{ item }}"
+    state: present
+    virtualenv: "{{ _venv_bin | dirname }}"
+    virtualenv_site_packages: "no"
+    extra_args: "{{ _pip_install_options|default('') }}"
+  register: install_packages
+  until: install_packages|success
+  retries: 5
+  delay: 2
+  with_items: _pip_packages
+  when:
+    - _venv_enabled | bool
+    - _get_venv | failed or _developer_mode | bool
+  notify: Restart OpenStack service(s)
+
+- name: Install pip packages (no venv)
+  pip:
+    name: "{{ item }}"
+    state: present
+    extra_args: "{{ _pip_install_options|default('') }}"
+  register: install_packages
+  until: install_packages|success
+  retries: 5
+  delay: 2
+  with_items: _pip_packages
+  when:
+    - not _developer_mode | bool
+    - not _venv_enabled | bool
+  notify: Restart OpenStack service(s)
